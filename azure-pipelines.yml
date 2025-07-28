@@ -1,0 +1,101 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  buildConfiguration: 'Release'
+
+steps:
+- task: UseDotNet@2
+  displayName: 'Use .NET Core sdk'
+  inputs:
+    packageType: sdk
+    version: '5.0.x'
+    installationPath: $(Agent.ToolsDirectory)/dotnet
+
+- task: NodeTool@0
+  inputs:
+    versionSpec: '14.16' 
+
+- task: DotNetCoreCLI@2
+  displayName: Build
+  inputs:
+    projects: '**/*.csproj'
+    arguments: '--configuration $(BuildConfiguration) --force'
+
+- task: DotNetCoreCLI@2
+  displayName: 'dotnet publish CMS'
+  inputs:
+    command: 'publish'
+    publishWebProjects: false
+    projects: '**/Project.Cms.csproj'
+    arguments: '--configuration $(BuildConfiguration) -r win-x86 --self-contained true --output $(Build.ArtifactStagingDirectory)'
+    zipAfterPublish: false
+    modifyOutputPath: true
+    
+- task: Npm@1
+  displayName: 'npm install (Web)'
+  inputs:
+    command: 'install'
+    workingDir: './Project.Web'
+    verbose: true
+
+- task: PowerShell@2
+  displayName: 'Bundle scripts (Web)'
+  inputs:
+    targetType: 'inline'
+    workingDirectory: './Project.web'
+    script: '$env:NODE_ENV="production"; ./node_modules/.bin/webpack --config webpack.config.js'
+
+- task: PowerShell@2
+  displayName: 'Copy bundle output (Web)'
+  inputs:
+    targetType: 'inline'
+    workingDirectory: './Project.Web'
+    script: 'cp ./wwwroot $(Build.ArtifactStagingDirectory)/Project.Cms/wwwroot/Project.Web -recurse'
+
+- task: PowerShell@2
+  displayName: 'Copy Image bundle output (Cms)'
+  inputs:
+    targetType: 'inline'
+    workingDirectory: './Project.Cms'
+    script: 'cp ./wwwroot/Images $(Build.ArtifactStagingDirectory)/Project.Cms/wwwroot/Images -recurse'
+
+- task: Npm@1
+  displayName: 'npm install (Portal)'
+  inputs:
+    command: 'install'
+    workingDir: './Project.Portal'
+    verbose: true
+
+- task: PowerShell@2
+  displayName: 'Bundle scripts (Portal)'
+  inputs:
+    targetType: 'inline'
+    workingDirectory: './Project.Portal'
+    script: '$env:NODE_ENV="production"; ./node_modules/.bin/webpack --config webpack.config.js'
+    
+- task: PowerShell@2
+  displayName: 'Copy bundle output (Portal)'
+  inputs:
+    targetType: 'inline'
+    workingDirectory: './Project.Portal'
+    script: 'cp ./wwwroot $(Build.ArtifactStagingDirectory)/Project.Cms/wwwroot/Project.Portal -recurse'  
+   
+- task: ArchiveFiles@2
+  displayName: 'Archive CMS build output'
+  inputs:
+    rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/Project.Cms'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/Project.Cms.zip'
+    replaceExistingArchive: true
+    verbose: true
+
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish CMS artifact'
+  inputs:
+    pathtoPublish: '$(Build.ArtifactStagingDirectory)/Project.Cms.zip'
+    artifactName: 'Project Public Website'
